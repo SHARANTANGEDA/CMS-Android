@@ -1,13 +1,8 @@
 package crux.bphc.cms.fragments;
 
-
 import android.app.ProgressDialog;
-import android.content.DialogInterface;
+import android.content.res.TypedArray;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
-import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentManager;
-import android.support.v7.app.AlertDialog;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -17,42 +12,46 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
+
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
+import org.jetbrains.annotations.NotNull;
+
 import java.util.List;
 
-import app.MyApplication;
 import crux.bphc.cms.R;
-import helper.MoodleServices;
+import crux.bphc.cms.app.Urls;
+import crux.bphc.cms.models.course.Course;
+import crux.bphc.cms.models.enrol.Contact;
+import crux.bphc.cms.models.enrol.SearchedCourseDetail;
+import crux.bphc.cms.models.enrol.SelfEnrol;
+import crux.bphc.cms.network.MoodleServices;
 import io.realm.Realm;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
 import retrofit2.Retrofit;
 import retrofit2.converter.gson.GsonConverterFactory;
-import set.enrol.SelfEnrol;
-import set.search.Contact;
-import set.search.Course;
-
-import static app.Constants.API_URL;
-
 
 public class CourseEnrolFragment extends Fragment {
 
     private static final String TOKEN_KEY = "token";
     private static final String COURSE_KEY = "course";
 
-    private TextView mCourseDisplayName;
-    private TextView mCourseCategory;
-    private LinearLayout mTeachers;
-    private Button mEnrolButton;
+    private Realm realm;
 
     private String TOKEN;
-    private Course course;
+    private SearchedCourseDetail course;
 
     public CourseEnrolFragment() {
         // Required empty public constructor
     }
 
-    public static CourseEnrolFragment newInstance(String token, Course course) {
+    public static CourseEnrolFragment newInstance(String token, SearchedCourseDetail course) {
         CourseEnrolFragment fragment = new CourseEnrolFragment();
         Bundle args = new Bundle();
         args.putString(TOKEN_KEY, token);
@@ -74,65 +73,58 @@ public class CourseEnrolFragment extends Fragment {
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
         // Inflate the layout for this fragment
+        realm = Realm.getDefaultInstance();
         return inflater.inflate(R.layout.fragment_course_enrol, container, false);
     }
 
     @Override
-    public void onViewCreated(View view, @Nullable Bundle savedInstanceState) {
+    public void onViewCreated(@NotNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        mCourseDisplayName = view.findViewById(R.id.course_enrol_course_display_name);
-        mCourseDisplayName.setText(course.getDisplayname());
+        TextView mCourseDisplayName = view.findViewById(R.id.course_enrol_course_display_name);
+        mCourseDisplayName.setText(course.getDisplayName());
 
-        mCourseCategory = view.findViewById(R.id.course_enrol_course_category);
-        mCourseCategory.setText(course.getCategoryname());
+        TextView mCourseCategory = view.findViewById(R.id.course_enrol_course_category);
+        mCourseCategory.setText(course.getCategoryName());
 
-        mTeachers = view.findViewById(R.id.course_enrol_teachers);
+        LinearLayout mTeachers = view.findViewById(R.id.course_enrol_teachers);
         List<Contact> teachers = course.getContacts();
         TextView noTeacherInfo = view.findViewById(R.id.course_enrol_teacher_no_info);
-        if (teachers.size() == 0 || teachers == null) {
+        if (teachers == null || teachers.size() == 0) {
             noTeacherInfo.setVisibility(View.VISIBLE);
         } else {
+            noTeacherInfo.setVisibility(View.GONE);
             LinearLayout.LayoutParams layoutParams = (LinearLayout.LayoutParams) noTeacherInfo.getLayoutParams();
             layoutParams.setMargins(0, 8, 0, 0);
+
+            TypedValue typedValue = new TypedValue();
+            requireActivity().getTheme().resolveAttribute(android.R.attr.textColorPrimary, typedValue, true);
+            TypedArray arr = requireActivity().obtainStyledAttributes(typedValue.data, new int[]{
+                    android.R.attr.textColorSecondary});
+            int textColor = arr.getColor(0, -1);
+            arr.recycle();
+
             for (Contact contact : teachers) {
                 TextView teacherName = new TextView(getActivity());
                 teacherName.setLayoutParams(layoutParams);
-                teacherName.setText(contact.getFullname());
+                teacherName.setText(contact.getFullName());
+                teacherName.setTextColor(textColor);
                 teacherName.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-                teacherName.setPadding(8, 0, 8, 0);
+                teacherName.setPaddingRelative(8, 0, 8, 0);
                 mTeachers.addView(teacherName);
             }
         }
 
-        mEnrolButton = view.findViewById(R.id.course_enrol_enrol_button);
-        mEnrolButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                createEnrollmentConfirmationDialog().show();
-            }
-        });
+        Button mEnrolButton = view.findViewById(R.id.course_enrol_enrol_button);
+        mEnrolButton.setOnClickListener(v -> createEnrollmentConfirmationDialog().show());
 
     }
 
     private AlertDialog createEnrollmentConfirmationDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
-        builder.setMessage(R.string.course_enrol_confirmation_msg);
-
-        builder.setPositiveButton("OK", new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                //Toast.makeText(getActivity(), "Positive button works", Toast.LENGTH_SHORT).show();
-                enrolInCourse();
-            }
-        });
-
-        builder.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-
-            }
-        });
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(requireContext())
+                .setMessage(R.string.course_enrol_confirmation_msg)
+                .setPositiveButton("OK", (dialog, which) -> enrolInCourse())
+                .setNegativeButton("Cancel", (dialog, which) -> { });
         return builder.create();
     }
 
@@ -143,7 +135,7 @@ public class CourseEnrolFragment extends Fragment {
         progressDialog.show();
 
         Retrofit retrofit = new Retrofit.Builder()
-                .baseUrl(API_URL)
+                .baseUrl(Urls.MOODLE_URL.toString())
                 .addConverterFactory(GsonConverterFactory.create())
                 .build();
         MoodleServices moodleServices = retrofit.create(MoodleServices.class);
@@ -152,26 +144,22 @@ public class CourseEnrolFragment extends Fragment {
         System.out.println(call.request().url());
         call.enqueue(new Callback<SelfEnrol>() {
             @Override
-            public void onResponse(Call<SelfEnrol> call, Response<SelfEnrol> response) {
+            public void onResponse(@NotNull Call<SelfEnrol> call, @NotNull Response<SelfEnrol> response) {
                 progressDialog.dismiss();
-                boolean status = response.body().getStatus();
-                System.out.println("status is: " + status);
-                if (status) {
+                SelfEnrol body;
+                if ((body = response.body()) != null && body.getStatus()) {
                     Toast.makeText(
                             getActivity(),
-                            "Successfully enrolled in " + course.getDisplayname(),
+                            "Successfully enrolled in " + course.getDisplayName(),
                             Toast.LENGTH_SHORT).show();
 
-                    FragmentManager fragmentManager = getActivity().getSupportFragmentManager();
+                    FragmentManager fragmentManager = requireActivity().getSupportFragmentManager();
 
-                    CourseSectionFragment courseSectionFragment = CourseSectionFragment
-                            .newInstance(TOKEN, course.getId());
-                    set.Course courseSet = new set.Course(course);
+                    CourseContentFragment courseSectionFragment = CourseContentFragment
+                            .newInstance(TOKEN, course.getId(), "");
+                    Course courseSet = new Course(course);
 
-                    Realm realm = MyApplication.getInstance().getRealmInstance();
-                    realm.beginTransaction();
-                    realm.copyToRealmOrUpdate(courseSet);
-                    realm.commitTransaction();
+                    realm.executeTransaction(r -> r.copyToRealmOrUpdate(courseSet));
 
                     fragmentManager
                             .beginTransaction()
@@ -183,11 +171,16 @@ public class CourseEnrolFragment extends Fragment {
             }
 
             @Override
-            public void onFailure(Call<SelfEnrol> call, Throwable t) {
+            public void onFailure(@NotNull Call<SelfEnrol> call, @NotNull Throwable t) {
                 progressDialog.dismiss();
                 Toast.makeText(getActivity(), "Unable to connect to server", Toast.LENGTH_SHORT).show();
             }
         });
     }
 
+    @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+        realm.close();
+    }
 }
